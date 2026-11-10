@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;background:#06130c;color:#fff;font-family:system-ui;text-align:center}canvas{background:#000;border-radius:12px;margin-top:10px;max-width:92vw}button{padding:10px 18px;border-radius:10px;border:0;background:#22e07a;font-weight:800;cursor:pointer}</style>
+<h2>🐍 Mini Snake <span id="s">0</span></h2>
+<canvas id="cv" width="360" height="360"></canvas><br><br>
+<button id="st">▶ começar</button> <button id="sv">💾 salvar recorde</button>
+<script>
+const cv=document.getElementById("cv"),x=cv.getContext("2d"),S=document.getElementById("s");
+let sn,dx,dy,fx,fy,score=0,loop=null,best=+(localStorage.sn_best||0);
+function reset(){sn=[[8,8],[7,8]];dx=1;dy=0;score=0;place();draw();}
+function place(){fx=Math.floor(Math.random()*18);fy=Math.floor(Math.random()*18);}
+function draw(){x.fillStyle="#000";x.fillRect(0,0,360,360);
+x.fillStyle="#ff5470";x.fillRect(fx*20,fy*20,18,18);
+x.fillStyle="#22e07a";sn.forEach(p=>x.fillRect(p[0]*20,p[1]*20,18,18));S.textContent=score+" (recorde "+best+")";}
+addEventListener("keydown",e=>{if(e.key==="ArrowUp"&&dy!==1){dx=0;dy=-1}if(e.key==="ArrowDown"&&dy!==-1){dx=0;dy=1}if(e.key==="ArrowLeft"&&dx!==1){dx=-1;dy=0}if(e.key==="ArrowRight"&&dx!==-1){dx=1;dy=0}});
+let touch=null;cv.ontouchstart=e=>touch=e.touches[0];cv.ontouchend=e=>{const t=e.changedTouches[0];const ax=t.clientX-touch.clientX,ay=t.clientY-touch.clientY;if(Math.abs(ax)>Math.abs(ay)){dx=Math.sign(ax);dy=0}else{dy=Math.sign(ay);dx=0}};
+document.getElementById("st").onclick=()=>{reset();clearInterval(loop);loop=setInterval(step,140);};
+function step(){const h=[sn[0][0]+dx,sn[0][1]+dy];
+if(h[0]<0||h[1]<0||h[0]>17||h[1]>17||sn.some(p=>p[0]===h[0]&&p[1]===h[1])){clearInterval(loop);
+if(score>best){best=score;localStorage.sn_best=best;parent.postMessage({nexus:"save",slot:1,data:JSON.stringify({recorde:best})},"*");parent.postMessage({nexus:"xp",amount:10,reason:"novo recorde no snake!"},"*");}
+return;}
+sn.unshift(h);if(h[0]===fx&&h[1]===fy){score+=5;place();if(score%25===0)parent.postMessage({nexus:"xp",amount:3,reason:score+" pts no snake"},"*");}else sn.pop();draw();}
+document.getElementById("sv").onclick=()=>parent.postMessage({nexus:"save",slot:1,data:JSON.stringify({recorde:Math.max(best,score)})},"*");
+window.addEventListener("message",e=>{try{if(e.data&&e.data.nexus==="load"){const d=JSON.parse(e.data.data);if(d.recorde!=null){best=d.recorde;draw();}}}catch(err){}});
+reset();
+</script>

@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;background:#070b1d;color:#fff;font-family:system-ui;text-align:center}button{font-size:22px;padding:14px 26px;border-radius:14px;border:0;background:linear-gradient(135deg,#7c5cff,#00e5ff);color:#fff;font-weight:800;cursor:pointer}#c{font-size:64px;margin:14px}.card{max-width:420px;margin:20px auto;background:#131a3a;padding:18px;border-radius:16px;border:1px solid #ffffff22}</style>
+<div class="card"><h1>⚡ Neon Clicker</h1><div id="c">0</div>
+<button id="b">CLICAR +1</button>
+<div style="margin-top:10px"><button id="s" style="font-size:14px">💾 salvar</button> <span id="m" style="opacity:.7"></span></div>
+<p style="opacity:.6;font-size:13px">Integrado com a NEXUS: salva na nuvem e dá XP a cada 25 cliques.</p></div>
+<script>
+let n=+(localStorage.nc||0), since=0;
+const c=document.getElementById("c"), m=document.getElementById("m");
+function draw(){c.textContent=n}
+draw();
+document.getElementById("b").onclick=()=>{n++;since++;draw();localStorage.nc=n;
+  if(since>=25){since=0;parent.postMessage({nexus:"xp",amount:5,reason:"25 cliques!"},"*");m.textContent="+5 XP!";setTimeout(()=>m.textContent="",1500);}
+};
+document.getElementById("s").onclick=()=>{localStorage.nc=n;parent.postMessage({nexus:"save",slot:1,data:JSON.stringify({clicks:n,ts:Date.now()})},"*");m.textContent="salvo!";};
+window.addEventListener("message",e=>{try{if(e.data&&e.data.nexus==="load"){const d=JSON.parse(e.data.data);if(d.clicks!=null){n=d.clicks;draw();m.textContent="save carregado!";}}}catch(err){}});
+// pede load automático? a launcher injeta via botão Carregar
+parent.postMessage({nexus:"ready"},"*");
+</script>
