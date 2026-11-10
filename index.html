@@ -1,0 +1,395 @@
+<div id="app"></div>
+<link rel="stylesheet" href="src/styles.css">
+<link rel="manifest" href="src/manifest.webmanifest">
+<link rel="icon" type="image/png" href="src/icon-512.png">
+<link rel="apple-touch-icon" href="src/icon-192.png">
+<meta name="theme-color" content="#7c5cff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NEXUS">
+
+<script type="text/x-server-plugin">
+// NEXUS Launcher — servidor autoritativo (contas, saves, XP, chat, convites, presença)
+// Todo este código é PÚBLICO. Não há senhas reais aqui — use apelidos.
+const VER = 1;
+const MAX_JSON = 4000000;
+const MAX_USERS = 2000, MAX_GAMES = 400, MAX_INV = 600;
+
+// ---------- sha256 (puro, sync) ----------
+const _K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function sha256HexBytes(bytes){
+  let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+  const ml=bytes.length; const bitLenHi=Math.floor(ml*8/0x100000000), bitLenLo=(ml*8)>>>0;
+  const withPad=ml+1+8; const blocks=Math.ceil(withPad/64); const buf=new Uint8Array(blocks*64);
+  buf.set(bytes,0); buf[ml]=0x80;
+  const dv=new DataView(buf.buffer);
+  dv.setUint32(blocks*64-8,bitLenHi); dv.setUint32(blocks*64-4,bitLenLo);
+  const w=new Uint32Array(64);
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let b=0;b<blocks;b++){
+    for(let i=0;i<16;i++) w[i]=dv.getUint32(b*64+i*4);
+    for(let i=16;i<64;i++){
+      const s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>>3);
+      const s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
+    }
+    let a=h0,bb=h1,c=h2,d=h3,e=h4,f=h5,g=h6,hh=h7;
+    for(let i=0;i<64;i++){
+      const S1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+      const ch=(e&f)^((~e)&g);
+      const t1=(hh+S1+ch+_K[i]+w[i])|0;
+      const S0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+      const mj=(a&bb)^(a&c)^(bb&c);
+      const t2=(S0+mj)|0;
+      hh=g;g=f;f=e;e=(d+t1)|0;d=c;c=bb;bb=a;a=(t1+t2)|0;
+    }
+    h0=(h0+a)|0;h1=(h1+bb)|0;h2=(h2+c)|0;h3=(h3+d)|0;h4=(h4+e)|0;h5=(h5+f)|0;h6=(h6+g)|0;h7=(h7+hh)|0;
+  }
+  const out=[h0,h1,h2,h3,h4,h5,h6,h7];
+  let s=""; for(let i=0;i<8;i++){ s+=("00000000"+(out[i]>>>0).toString(16)).slice(-8); }
+  return s;
+}
+const TE=new TextEncoder(), TD=new TextDecoder();
+function pwHash(u,p){ return sha256HexBytes(TE.encode("nexus::"+u+"::"+p)); }
+
+// ---------- estado ----------
+let cache=null, cacheLen=-1;
+function freshDb(){
+  return {users:{},sess:{},games:[
+    {id:"neon-clicker",name:"Neon Clicker",desc:"Clicker incremental demo com save na nuvem e XP.",play:"src/games/neon-clicker.html",repo:"",cover:"",cat:"Demo",by:"NEXUS",ts:1},
+    {id:"mini-snake",name:"Mini Snake",desc:"Snake clássico em canvas. Bate recorde e ganha XP.",play:"src/games/mini-snake.html",repo:"",cover:"",cat:"Demo",by:"NEXUS",ts:2}
+  ],chat:{global:[{u:"sistema",d:"NEXUS",a:"◈",t:"Bem-vindo ao chat global! Crie sua conta e chame amigos. 🎮",ts:Date.now()}]},invites:[],seq:1,sessions:[]};
+}
+function dbLoad(){
+  try{
+    if(state[0]!==VER) return freshDb();
+    const len=state[1]|(state[2]<<8)|(state[3]<<16)|(state[4]<<24);
+    if(len<=0||len>MAX_JSON) return freshDb();
+    if(cache&&cacheLen===len) return cache;
+    const js=TD.decode(state.subarray(5,5+len));
+    const db=JSON.parse(js);
+    if(!db||!db.users||!db.sess) return freshDb();
+    cache=db; cacheLen=len; return db;
+  }catch(e){ return freshDb(); }
+}
+function dbSave(db){
+  const js=JSON.stringify(db);
+  const b=TE.encode(js);
+  if(b.length>MAX_JSON) throw new Error("servidor cheio");
+  if(b.length+5>state.length) throw new Error("servidor cheio");
+  state[0]=VER;
+  state[1]=b.length&255; state[2]=(b.length>>8)&255; state[3]=(b.length>>16)&255; state[4]=(b.length>>24)&255;
+  state.set(b,5);
+  cache=db; cacheLen=b.length;
+}
+
+// ---------- efêmeros ----------
+const CONN=new Map();   // id -> {conn,u,playing}
+const RL=new Map();     // "id:motivo" -> {c,t}
+const LASTCHAT=new Map();
+function allow(key,limit,win){
+  const n=Date.now(); const e=RL.get(key);
+  if(!e||n-e.t>win){RL.set(key,{c:1,t:n});return true;}
+  e.c++; return e.c<=limit;
+}
+function dayStr(){ return String(Math.floor(Date.now()/86400000)); }
+function authU(db,token){
+  if(!token||typeof token!=="string") return null;
+  const u=db.sess[token]; if(!u) return null;
+  if(!db.users[u]) return null; return u;
+}
+function pub(room,msg){ try{ pubsub.publish("chat:"+room, JSON.stringify(msg)); }catch(e){} }
+function ok(x){ return JSON.stringify(Object.assign({ok:true},x||{})); }
+function fail(err){ return JSON.stringify({ok:false,err:String(err)}); }
+function parse(data){ try{ return JSON.parse(String(data)); }catch(e){ return {}; } }
+const AV=["🎮","🧙","🐉","🦊","🤖","👾","🐱","⚔️"];
+function validUser(u){ return typeof u==="string"&&/^[a-zA-Z0-9_-]{3,16}$/.test(u); }
+const NIDABC="ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function newNid(db){
+  for(let t=0;t<20;t++){ let s="NX-"; for(let i=0;i<6;i++) s+=NIDABC[Math.floor(Math.random()*NIDABC.length)];
+    let dup=false; for(const k in db.users){ if(db.users[k].nid===s){dup=true;break;} }
+    if(!dup) return s; }
+  return "NX-"+Date.now().toString(36).toUpperCase().slice(-6);
+}
+function ensureNid(db,r){ if(!r.nid) r.nid=newNid(db); return r.nid; }
+function pubUser(u,r){ return {u:u,d:r.d,a:r.a,xp:r.xp||0,play:r.play||0,nid:r.nid||"",links:r.links||{}}; }
+
+self.onopen=function(e){
+  const conn=e.conn;
+  CONN.set(conn.id,{conn:conn,u:"",playing:""});
+  try{ conn.subscribe("chat:global"); }catch(err){}
+};
+self.onclose=function(e){
+  CONN.delete(e.conn.id); RL.delete(e.conn.id+":chat");
+};
+self.onmessage=function(){};
+
+self.rpc={
+ping:function(){ return ok({t:Date.now()}); },
+join:function(ctx,data){
+  const p=parse(data); const room=String(p.room||"global").slice(0,64);
+  if(!/^[A-Za-z0-9:_-]{1,64}$/.test(room)) throw new Error("sala inválida");
+  try{ ctx.conn.subscribe("chat:"+room); }catch(e){ throw new Error("sala inválida"); }
+  return ok({});
+},
+register:function(ctx,data){
+  if(!allow(ctx.conn.id+":reg",5,300000)) return fail("muitas tentativas — aguarde");
+  const p=parse(data);
+  const u=String(p.u||"").trim(), pw=String(p.p||""), d=String(p.d||u).slice(0,24)||u;
+  if(!validUser(u)) return fail("usuário: 3–16 letras/números/_/-");
+  if(pw.length<4||pw.length>64) return fail("senha: mín. 4 caracteres");
+  const db=dbLoad(); const k=u.toLowerCase();
+  if(db.users[k]) return fail("esse usuário já existe — tente Entrar");
+  if(Object.keys(db.users).length>=MAX_USERS) return fail("servidor cheio");
+  db.users[k]={p:pwHash(k,pw),d:d,a:AV[Math.floor(Math.random()*AV.length)],xp:50,play:0,created:Date.now(),seen:Date.now(),gp:{},cd:{day:dayStr(),n:0},nid:newNid(db),links:{}};
+  const tok="t"+Date.now().toString(36)+Math.floor(Math.random()*1e9).toString(36)+Math.floor(Math.random()*1e9).toString(36);
+  db.sess[tok]=k; dbSave(db);
+  CONN.set(ctx.conn.id,{conn:ctx.conn,u:k,playing:""});
+  return ok({token:tok,user:pubUser(k,db.users[k])});
+},
+login:function(ctx,data){
+  if(!allow(ctx.conn.id+":login",10,300000)) return fail("muitas tentativas — aguarde");
+  const p=parse(data); const u=String(p.u||"").trim().toLowerCase(), pw=String(p.p||"");
+  const db=dbLoad(); const rec=db.users[u];
+  if(!rec||rec.p!==pwHash(u,pw)) return fail("usuário ou senha incorretos");
+  rec.seen=Date.now(); const changed=!rec.nid; ensureNid(db,rec);
+  if(!rec.links) rec.links={};
+  const tok="t"+Date.now().toString(36)+Math.floor(Math.random()*1e9).toString(36)+Math.floor(Math.random()*1e9).toString(36);
+  db.sess[tok]=u; dbSave(db);
+  CONN.set(ctx.conn.id,{conn:ctx.conn,u:u,playing:CONN.get(ctx.conn.id)?.playing||""});
+  return ok({token:tok,user:pubUser(u,rec)});
+},
+logout:function(ctx,data){
+  const p=parse(data); const db=dbLoad();
+  if(p.token&&db.sess[p.token]){ delete db.sess[p.token]; dbSave(db); }
+  const c=CONN.get(ctx.conn.id); if(c){c.u="";c.playing="";CONN.set(ctx.conn.id,c);}
+  return ok({});
+},
+me:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("sessão expirada");
+  const r=db.users[u]; ensureNid(db,r); if(!r.links) r.links={};
+  const c=CONN.get(ctx.conn.id); if(c){c.u=u;CONN.set(ctx.conn.id,c);}
+  return ok({user:pubUser(u,r)});
+},
+updateProfile:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const r=db.users[u];
+  if(p.d&&String(p.d).trim()) r.d=String(p.d).trim().slice(0,24);
+  if(p.a) r.a=String(p.a).slice(0,8);
+  r.seen=Date.now(); dbSave(db); return ok({user:pubUser(u,r)});
+},
+addXP:function(ctx,data){
+  if(!allow(ctx.conn.id+":xp",4,15000)) return fail("calma — XP tem intervalo");
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  let amt=Math.floor(+p.amount||0); if(!(amt>=1&&amt<=50)) return fail("quantidade inválida");
+  const r=db.users[u]; const ds=dayStr();
+  if(!r.cd||r.cd.day!==ds) r.cd={day:ds,n:0};
+  if(r.cd.n+amt>2000) return fail("limite diário de XP");
+  r.cd.n+=amt; r.xp=(r.xp||0)+amt; r.seen=Date.now(); dbSave(db);
+  return ok({xp:r.xp});
+},
+heartbeat:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  const c=CONN.get(ctx.conn.id);
+  const gid=String(p.gid||"").slice(0,80);
+  if(c){ if(gid) c.playing=gid; CONN.set(ctx.conn.id,c); }
+  if(!u) return ok({});
+  const r=db.users[u];
+  let add=Math.floor(+p.addSec||0); if(!(add>=0&&add<=65)) add=0;
+  if(add>0){
+    if(!allow(ctx.conn.id+":hb",1,8000)) add=0;
+    else{
+      r.play=(r.play||0)+add;
+      const gkey=gid||"__geral"; r.gp[gkey]=(r.gp[gkey]||0)+add;
+      const gain=Math.floor(add/30); // 1 XP a cada 30s validados
+      if(gain>0){ const ds=dayStr(); if(!r.cd||r.cd.day!==ds) r.cd={day:ds,n:0};
+        if(r.cd.n+gain<=2000){ r.cd.n+=gain; r.xp=(r.xp||0)+gain; } }
+    }
+  }
+  r.seen=Date.now(); dbSave(db);
+  return ok({xp:r.xp,play:r.play});
+},
+saveSlot:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const gid=String(p.gid||"").slice(0,80); const slot=Math.floor(+p.slot||0);
+  const sdata=String(p.data==null?"":p.data);
+  if(!gid||!(slot>=1&&slot<=3)) return fail("slot inválido");
+  if(sdata.length>20000) return fail("save muito grande (20KB)");
+  const r=db.users[u]; if(!r.saves) r.saves={};
+  if(!r.saves[gid]) r.saves[gid]={};
+  r.saves[gid][slot]={data:sdata,ts:Date.now()}; r.seen=Date.now();
+  try{ dbSave(db); }catch(e){ return fail("servidor cheio"); }
+  return ok({});
+},
+mySaves:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  return ok({saves:db.users[u].saves||{}});
+},
+addGame:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário para publicar");
+  const g=p.game||{};
+  const name=String(g.name||"").trim().slice(0,60);
+  const play=String(g.play||"").trim().slice(0,500);
+  if(!name||!play) return fail("nome e URL jogável obrigatórios");
+  if(!/^https?:\/\/.+\..+/.test(play)&&play[0]!==".") return fail("URL jogável inválida");
+  if(db.games.length>=MAX_GAMES) return fail("catálogo cheio");
+  const id=String(g.id||("g"+Date.now().toString(36))).slice(0,40);
+  if(db.games.some(function(x){return x.id===id;})) return fail("jogo já existe");
+  db.games.unshift({id:id,name:name,desc:String(g.desc||"").slice(0,200),play:play,repo:String(g.repo||"").slice(0,300),cover:String(g.cover||"").slice(0,500),cat:String(g.cat||"Jogo").slice(0,20),by:u,ts:Date.now()});
+  const r=db.users[u]; r.xp=(r.xp||0)+10; r.seen=Date.now();
+  dbSave(db); return ok({xp:r.xp});
+},
+listGames:function(){
+  const db=dbLoad();
+  return ok({games:db.games.slice(0,400)});
+},
+chatSend:function(ctx,data){
+  const last=LASTCHAT.get(ctx.conn.id)||0; const n=Date.now();
+  if(n-last<1200) return fail("mensagem muito rápida");
+  if(!allow(ctx.conn.id+":chat5",30,300000)) return fail("limite de mensagens");
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário p/ chat");
+  const room=String(p.room||"global").slice(0,64);
+  if(!/^[A-Za-z0-9:_-]{1,64}$/.test(room)) return fail("sala inválida");
+  const t=String(p.text||"").trim().slice(0,280); if(!t) return fail("mensagem vazia");
+  const r=db.users[u];
+  if(!db.chat[room]) db.chat[room]=[];
+  const msg={u:u,d:r.d,a:r.a,t:t,ts:n};
+  db.chat[room].push(msg); while(db.chat[room].length>80) db.chat[room].shift();
+  const ds=dayStr(); if(!r.cd||r.cd.day!==ds) r.cd={day:ds,n:0};
+  if(r.cd.n<2000){ r.cd.n+=1; r.xp=(r.xp||0)+1; }
+  r.seen=Date.now(); dbSave(db);
+  LASTCHAT.set(ctx.conn.id,n);
+  pub(room,Object.assign({k:"chat",room:room},msg));
+  return ok({xp:r.xp});
+},
+chatGet:function(ctx,data){
+  const p=parse(data); const room=String(p.room||"global").slice(0,64);
+  const lim=Math.min(60,Math.max(5,Math.floor(+p.limit||30)));
+  const db=dbLoad();
+  return ok({msgs:(db.chat[room]||[]).slice(-lim)});
+},
+inviteSend:function(ctx,data){
+  if(!allow(ctx.conn.id+":inv",10,600000)) return fail("muitas tentativas");
+  const p=parse(data); const db=dbLoad(); const from=authU(db,p.token);
+  if(!from) return fail("login necessário");
+  let to=String(p.to||"").trim().toLowerCase();
+  if(/^nx-[a-z0-9]{6}$/i.test(to)){ // convidar pelo NEXUS ID
+    const up=to.toUpperCase(); to="";
+    for(const k in db.users){ if((db.users[k].nid||"").toUpperCase()===up){ to=k; break; } }
+    if(!to) return fail("NEXUS ID não encontrado");
+  }
+  const gid=String(p.gid||"").slice(0,80);
+  if(!validUser(to)&&!/^[a-z0-9_-]{3,16}$/i.test(to)) return fail("usuário inválido");
+  if(!db.users[to]) return fail("usuário não encontrado");
+  if(to===from) return fail("não dá p/ convidar você mesmo");
+  const g=db.games.find(function(x){return x.id===gid;});
+  if(db.invites.filter(function(i){return i.st===0;}).length>=MAX_INV) return fail("muitos convites pendentes");
+  const id=db.seq++;
+  db.invites.push({id:id,from:from,fromD:db.users[from].d,to:to,gid:gid,gameName:g?g.name:gid,msg:String(p.msg||"").slice(0,120),ts:Date.now(),st:0});
+  while(db.invites.length>MAX_INV) db.invites.shift();
+  dbSave(db);
+  try{ pubsub.publish("inv:"+to,JSON.stringify({k:"invite",to:to,from:from,fromD:db.users[from].d,gid:gid,gameName:g?g.name:gid})); }catch(e){}
+  try{ const cs=[]; CONN.forEach(function(v){ if(v.u===to){ try{v.conn.send(JSON.stringify({k:"invite",to:to,from:from,fromD:db.users[from].d,gid:gid,gameName:g?g.name:gid}));}catch(ee){} } }); }catch(e2){}
+  return ok({id:id});
+},
+inviteList:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const mine=[];
+  for(let i=db.invites.length-1;i>=0&&mine.length<30;i--){ const it=db.invites[i]; if(it.to===u||it.from===u) mine.push(it); }
+  return ok({invites:mine});
+},
+inviteRespond:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const id=Math.floor(+p.id||0);
+  const inv=db.invites.find(function(i){return i.id===id&&i.to===u;});
+  if(!inv) return fail("convite não encontrado");
+  if(inv.st!==0) return ok({});
+  inv.st=p.accept?1:2; dbSave(db); return ok({st:inv.st});
+},
+link:function(ctx,data){ // 🔗 vincular conta do jogo (nick/id nele)
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const gid=String(p.gid||"").slice(0,80); const name=String(p.name||"").trim().slice(0,24);
+  if(!gid||!name) return fail("escolha o jogo e seu nick nele");
+  const r=db.users[u]; if(!r.links) r.links={};
+  if(Object.keys(r.links).length>=20) return fail("muitas contas vinculadas");
+  r.links[gid]={name:name,tag:String(p.tag||"").trim().slice(0,24),ts:Date.now()};
+  r.seen=Date.now(); dbSave(db);
+  return ok({links:r.links});
+},
+unlink:function(ctx,data){
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const gid=String(p.gid||"").slice(0,80);
+  const r=db.users[u]; if(r.links&&r.links[gid]){ delete r.links[gid]; dbSave(db); }
+  return ok({links:r.links||{}});
+},
+session:function(ctx,data){ // 🎫 sessão de jogo válida por 60 min
+  if(!allow(ctx.conn.id+":sess",5,60000)) return fail("aguarde um pouco");
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const gid=String(p.gid||"").slice(0,80); if(!gid) return fail("jogo inválido");
+  if(!db.sessions) db.sessions=[];
+  const now=Date.now();
+  db.sessions=db.sessions.filter(function(s){return s.exp>now;});
+  while(db.sessions.length>=300) db.sessions.shift();
+  const abc="abcdefghijklmnopqrstuvwxyz0123456789"; let t="S"+now.toString(36);
+  for(let i=0;i<20;i++) t+=abc[Math.floor(Math.random()*abc.length)];
+  const exp=now+3600000;
+  db.sessions.push({tok:t,u:u,gid:gid,exp:exp});
+  dbSave(db);
+  return ok({token:t,exp:exp});
+},
+sessionCheck:function(ctx,data){
+  const p=parse(data); const db=dbLoad();
+  const t=String(p.token||"");
+  const s=(db.sessions||[]).find(function(x){return x.tok===t;});
+  if(!s||s.exp<=Date.now()) return fail("sessão vencida");
+  const r=db.users[s.u]; if(!r) return fail("sessão inválida");
+  return ok({u:s.u,d:r.d,a:r.a,nid:r.nid||"",gid:s.gid,exp:s.exp,link:(r.links&&r.links[s.gid])||null});
+},
+online:function(){
+  const out=[]; const seen={};
+  let db=null; try{ db=dbLoad(); }catch(e){ return ok({users:[]}); }
+  CONN.forEach(function(v){
+    if(!v.u||seen[v.u]) return; seen[v.u]=1;
+    const r=db.users[v.u];
+    if(r) out.push({u:v.u,d:r.d,a:r.a,playing:v.playing||""});
+  });
+  return ok({users:out.slice(0,200)});
+},
+top:function(){ // 🏆 ranking por XP (top 20)
+  const db=dbLoad();
+  const arr=Object.keys(db.users).map(function(u){ const r=db.users[u]; return {u:u,d:r.d,a:r.a,xp:r.xp||0}; });
+  arr.sort(function(a,b){ return b.xp-a.xp; });
+  return ok({top:arr.slice(0,20),total:Object.keys(db.users).length});
+},
+daily:function(ctx,data){ // 🎁 recompensa diária +25 XP
+  if(!allow(ctx.conn.id+":daily",3,60000)) return fail("aguarde um pouco");
+  const p=parse(data); const db=dbLoad(); const u=authU(db,p.token);
+  if(!u) return fail("login necessário");
+  const r=db.users[u]; const ds=dayStr();
+  if(r.lastDaily===ds) return fail("já resgatou hoje — volte amanhã! 🎁");
+  r.lastDaily=ds;
+  if(!r.cd||r.cd.day!==ds) r.cd={day:ds,n:0};
+  const amt=Math.min(25,2000-r.cd.n); if(amt<=0) return fail("limite diário de XP");
+  r.cd.n+=amt; r.xp=(r.xp||0)+amt; r.seen=Date.now(); dbSave(db);
+  return ok({xp:r.xp,amt:amt});
+}
+};
+</script>
+
+<script type="module">
+import { boot } from "./src/app.js";
+boot();
+</script>

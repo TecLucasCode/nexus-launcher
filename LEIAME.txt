@@ -1,0 +1,12 @@
+NEXUS LAUNCHER v4 - CODIGO-FONTE
+================================
+Biblioteca (Stick Arena, Star Velocity + demos), NEXUS ID,
+contas vinculadas, sessao de 60min, ranking, daily, chat,
+convites, saves na nuvem, PWA instalavel.
+
+1) APK estilo Erik: gere com "Website 2 APK Builder" (celular)
+   ou pwabuilder.com (PC) usando o link da launcher online,
+   crie Release no GitHub e anexe o .apk.
+2) Este codigo e opcional (registro/historico). O que roda
+   online fica no Perchance (servidor).
+Versao online: https://perchance.org/t46djlgvkt

@@ -1,0 +1,8 @@
+// Launcher config
+$meta
+  title = NEXUS Launcher — sua biblioteca de jogos
+  description = Launcher de jogos: contas, biblioteca GitHub, saves na nuvem, XP, chat e convites.
+  tags = games, launcher, multiplayer, chat, github
+
+createServerSocket = {import:server-plugin}
+kv = {import:kv-plugin}
